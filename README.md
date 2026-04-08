@@ -1,6 +1,6 @@
 # ABACUS Finite Difference (abacus-fd)
 
-A Python library for computing forces via finite difference with ABACUS DFT software.
+A Python library for computing forces (unit: eV/Angstrom) via finite difference with ABACUS DFT software.
 
 ## Installation
 
@@ -20,245 +20,176 @@ pip install -e .
 - `numpy`
 - ABACUS executable (external, not included)
 
-## Python API
-
-```python
-from abacus_fd import (
-    run_diff_all_groundstate,
-    run_diff_all_lr,
-    run_diff_custom_groundstate,
-    run_diff_custom_lr,
-    run_diff_custom_kslr,
-    run_diff_all_kslr,
-)
-```
-
-### run_diff_all_groundstate(dir, abacus_path, dx=0.001)
-
-Compute ground state forces for all atoms using finite difference.
-
-**Parameters:**
-- `dir`: Working directory containing STRU, INPUT (and optionally KPT) files
-- `abacus_path`: Path to the ABACUS executable
-- `dx`: Displacement distance in Angstrom (default: 0.001)
-
-**Returns:** numpy array of shape (natoms, 3) containing forces in eV/Angstrom
-
-### run_diff_all_lr(dir, abacus_path, dx=0.001, skip_groundstate=False)
-
-Compute LR-TDDFT excited state forces for all atoms.
-
-**Parameters:**
-- `dir`: Working directory containing STRU, INPUT_gs, INPUT_lr (and optionally KPT) files
-- `abacus_path`: Path to the ABACUS executable
-- `dx`: Displacement distance in Angstrom (default: 0.001)
-- `skip_groundstate`: Skip ground state calculation if already done (default: False)
-
-**Returns:** numpy array of shape (2, nstates, natoms, 3)
-- `[0]` = singlet forces, `[1]` = triplet forces, in eV/Angstrom
-
-**Output files** (saved to `dir`):
-- `excited_forces.npy`: numpy array
-- `excited_forces.txt`: human-readable format
-  - Columns: `S/T(0=S,1=T)  state_idx  atom_idx  x  y  z`
-
-### run_diff_custom_groundstate(dir, abacus_path, diffed_atom_indices, axes, dx=0.001)
-
-Compute ground state forces for specified atoms using finite difference.
-
-**Parameters:**
-- `dir`: Working directory containing STRU, INPUT (and optionally KPT) files
-- `abacus_path`: Path to the ABACUS executable
-- `diffed_atom_indices`: List of atom indices (0-based) to displace
-- `axes`: List of axes to displace ('x', 'y', 'z')
-- `dx`: Displacement distance in Angstrom (default: 0.001)
-
-**Returns:** dict mapping atom index to axis to force array
-
-### run_diff_custom_lr(dir, abacus_path, diffed_atom_indices, axes, dx=0.001, skip_groundstate=False)
-
-Compute LR-TDDFT excited state forces for specified atoms.
-
-**Parameters:**
-- `dir`: Working directory containing STRU, INPUT_gs, INPUT_lr (and optionally KPT) files
-- `abacus_path`: Path to the ABACUS executable
-- `diffed_atom_indices`: List of atom indices (0-based) to displace
-- `axes`: List of axes to displace ('x', 'y', 'z')
-- `dx`: Displacement distance in Angstrom (default: 0.001)
-- `skip_groundstate`: Skip ground state calculation if already done (default: False)
-
-**Returns:** dict mapping atom index to axis to force array
-
-### run_diff_custom_kslr(dir, abacus_path, diffed_atom_indices, axes, dx=0.001)
-
-Compute excited state forces using Kohn-Sham LR for specified atoms.
-
-**Parameters:**
-- `dir`: Working directory containing STRU, INPUT with lr_nstates (and optionally KPT) files
-- `abacus_path`: Path to the ABACUS executable
-- `diffed_atom_indices`: List of atom indices (0-based) to displace
-- `axes`: List of axes to displace ('x', 'y', 'z')
-- `dx`: Displacement distance in Angstrom (default: 0.001)
-
-**Returns:** dict mapping atom index to axis to force array
-
-### run_diff_all_kslr(dir, abacus_path, dx=0.001)
-
-Compute excited state forces using Kohn-Sham LR for all atoms.
-
-**Parameters:**
-- `dir`: Working directory containing STRU, INPUT with lr_nstates (and optionally KPT) files
-- `abacus_path`: Path to the ABACUS executable
-- `dx`: Displacement distance in Angstrom (default: 0.001)
-
-**Returns:** numpy array of shape (2, nstates, natoms, 3)
-- `[0]` = singlet forces, `[1]` = triplet forces, in eV/Angstrom
-
-**Output files** (saved to `dir`):
-- `excited_forces.npy`: numpy array
-- `excited_forces.txt`: human-readable format
-  - Columns: `S/T(0=S,1=T)  state_idx  atom_idx  x  y  z`
-
----
-
 ## Command Line Interface
-
-After installation, the `abacus-fd` command is available:
 
 ```bash
 abacus-fd --help
 ```
 
-### Commands
+### Command Categories
 
-#### gs-all
+| Command | Description | Atoms | Directions |
+|---------|-------------|-------|------------|
+| `kslr-all` | KSDFT + LR-TDDFT excited state forces | All atoms | x, y, z |
+| `kslr-custom` | KSDFT + LR-TDDFT excited state forces | Specified | Specified |
+| `gs-all` | Ground state forces | All atoms | x, y, z |
+| `gs-custom` | Ground state forces | Specified | Specified |
+| `lr-all` | LR-TDDFT excited state forces | All atoms | x, y, z |
+| `lr-custom` | LR-TDDFT excited state forces | Specified | Specified |
 
-Compute ground state forces for all atoms using finite difference.
+- `all`: Compute forces for all atoms, displacement directions are x, y, z
+- `custom`: Compute forces only for specified atoms and directions
+- Atom indices are 0-based
+- Central difference (displacement ±dx/2)
 
+### Common Parameters
+
+| Short | Long | Description | Default |
+|-------|------|-------------|---------|
+| `-d` | `--dir` | Working directory | Current dir |
+| `-a` | `--abacus` | ABACUS executable path | `abacus` |
+| `-x` | `--dx` | Displacement (Angstrom) | `0.001` |
+| `-i` | `--indices` | Atom indices (comma-separated) | - |
+| `-s` | `--skip-gs` | Skip ground state calculation | False |
+
+### kslr-all
+
+KSDFT + LR-TDDFT excited state forces for all atoms along x/y/z.
+
+**Usage:**
 ```bash
-abacus-fd gs-all DIR ABACUS [--dx DX]
+abacus-fd kslr-all [-d DIR] [-a ABACUS] [-x DX]
 ```
 
-**Arguments:**
-- `DIR`: Working directory containing STRU, INPUT (and optionally KPT) files
-- `ABACUS`: Path to the ABACUS executable
-- `--dx DX`: Displacement distance in Angstrom (default: 0.001)
-
-**Example:**
+**Examples:**
 ```bash
-abacus-fd gs-all /path/to/dir /path/to/abacus --dx 0.001
+abacus-fd kslr-all
+abacus-fd kslr-all -d /path/to/dir -a /path/to/abacus -x 0.001
 ```
+
+**Input files:** `STRU`, `INPUT` (must set `lr_nstates`, `esolver_type ks-lr`)
+
+**Output files:**
+- `excited_forces.npy`: numpy array, shape `(2, nstates, natoms, 3)`
+- `excited_forces.txt`: text format, columns `S/T  state_idx  atom_idx  x  y  z`
 
 ---
 
-#### lr-all
+### kslr-custom
 
-Compute LR-TDDFT excited state forces for all atoms.
+KSDFT + LR-TDDFT excited state forces for specified atoms and directions.
 
+**Usage:**
 ```bash
-abacus-fd lr-all DIR ABACUS [--dx DX] [--skip-gs]
+abacus-fd kslr-custom [-d DIR] [-a ABACUS] -i INDICES --axes AXES [-x DX]
 ```
 
-**Arguments:**
-- `DIR`: Working directory containing STRU, INPUT_gs, INPUT_lr (and optionally KPT) files
-- `ABACUS`: Path to the ABACUS executable
-- `--dx DX`: Displacement distance in Angstrom (default: 0.001)
-- `--skip-gs`: Skip ground state calculation if already done
-
-**Example:**
-```bash
-abacus-fd lr-all /path/to/dir /path/to/abacus --dx 0.001
-abacus-fd lr-all /path/to/dir /path/to/abacus --skip-gs
+**Python equivalent:**
+```python
+from abacus_fd import run_diff_custom_kslr
+run_diff_custom_kslr(dir=".", abacus_path="abacus", diffed_atom_indices=[0, 1], axes=['x', 'y'], dx=0.001)
 ```
+
+**Examples:**
+```bash
+abacus-fd kslr-custom -i 0,1 --axes x,y
+abacus-fd kslr-custom -d /path -a /abacus -i 5 --axes z
+```
+
+**Input files:** `STRU`, `INPUT` (must set `lr_nstates`, `esolver_type ks-lr`)
 
 ---
 
-#### gs-custom
+### gs-all
 
-Compute ground state forces for specified atoms using finite difference.
+Ground state forces for all atoms along x/y/z.
 
+**Usage:**
 ```bash
-abacus-fd gs-custom DIR ABACUS --indices INDICES --axes AXES [--dx DX]
+abacus-fd gs-all [-d DIR] [-a ABACUS] [-x DX]
 ```
 
-**Arguments:**
-- `DIR`: Working directory containing STRU, INPUT (and optionally KPT) files
-- `ABACUS`: Path to the ABACUS executable
-- `--indices INDICES`: Comma-separated list of atom indices (0-based)
-- `--axes AXES`: Comma-separated list of axes (x,y,z)
-- `--dx DX`: Displacement distance in Angstrom (default: 0.001)
-
-**Example:**
+**Examples:**
 ```bash
-abacus-fd gs-custom /path/to/dir /path/to/abacus --indices 0,1,2 --axes x,y
-abacus-fd gs-custom /path/to/dir /path/to/abacus --indices 5 --axes z
+abacus-fd gs-all
+abacus-fd gs-all -d /path/to/dir -x 0.001
 ```
+
+**Input files:** `STRU`, `INPUT`
 
 ---
 
-#### lr-custom
+### gs-custom
 
-Compute LR-TDDFT excited state forces for specified atoms.
+Ground state forces for specified atoms and directions.
 
+**Usage:**
 ```bash
-abacus-fd lr-custom DIR ABACUS --indices INDICES --axes AXES [--dx DX] [--skip-gs]
+abacus-fd gs-custom [-d DIR] [-a ABACUS] -i INDICES --axes AXES [-x DX]
 ```
 
-**Arguments:**
-- `DIR`: Working directory containing STRU, INPUT_gs, INPUT_lr (and optionally KPT) files
-- `ABACUS`: Path to the ABACUS executable
-- `--indices INDICES`: Comma-separated list of atom indices (0-based)
-- `--axes AXES`: Comma-separated list of axes (x,y,z)
-- `--dx DX`: Displacement distance in Angstrom (default: 0.001)
-- `--skip-gs`: Skip ground state calculation if already done
-
-**Example:**
-```bash
-abacus-fd lr-custom /path/to/dir /path/to/abacus --indices 0,1 --axes x,y,z
-abacus-fd lr-custom /path/to/dir /path/to/abacus --indices 5 --axes z --skip-gs
+**Python equivalent:**
+```python
+from abacus_fd import run_diff_custom_groundstate
+run_diff_custom_groundstate(dir=".", abacus_path="abacus", diffed_atom_indices=[0, 1, 2], axes=['x', 'y'], dx=0.001)
 ```
+
+**Examples:**
+```bash
+abacus-fd gs-custom -i 0,1,2 --axes x,y
+abacus-fd gs-custom -d /path -i 5 --axes z
+```
+
+**Input files:** `STRU`, `INPUT`
 
 ---
 
-#### kslr-custom
+### lr-all
 
-Compute excited state forces using Kohn-Sham LR for specified atoms.
+LR-TDDFT excited state forces for all atoms along x/y/z.
 
+**Usage:**
 ```bash
-abacus-fd kslr-custom DIR ABACUS --indices INDICES --axes AXES [--dx DX]
+abacus-fd lr-all [-d DIR] [-a ABACUS] [-x DX] [-s]
 ```
 
-**Arguments:**
-- `DIR`: Working directory containing STRU, INPUT with lr_nstates (and optionally KPT) files
-- `ABACUS`: Path to the ABACUS executable
-- `--indices INDICES`: Comma-separated list of atom indices (0-based)
-- `--axes AXES`: Comma-separated list of axes (x,y,z)
-- `--dx DX`: Displacement distance in Angstrom (default: 0.001)
-
-**Example:**
+**Examples:**
 ```bash
-abacus-fd kslr-custom /path/to/dir /path/to/abacus --indices 0,1 --axes x,y
+abacus-fd lr-all
+abacus-fd lr-all -d /path -x 0.001
+abacus-fd lr-all -d /path --skip-gs
 ```
+
+**Input files:** `STRU`, `INPUT_gs`, `INPUT_lr`(must set `lr_nstates`, `esolver_type lr`)
+
+**Output files:**
+- `excited_forces.npy`: numpy array, shape `(2, nstates, natoms, 3)`
+- `excited_forces.txt`: text format, columns `S/T  state_idx  atom_idx  x  y  z`
 
 ---
 
-#### kslr-all
+### lr-custom
 
-Compute excited state forces using Kohn-Sham LR for all atoms.
+LR-TDDFT excited state forces for specified atoms and directions.
 
+**Usage:**
 ```bash
-abacus-fd kslr-all DIR ABACUS [--dx DX]
+abacus-fd lr-custom [-d DIR] [-a ABACUS] -i INDICES --axes AXES [-x DX] [-s]
 ```
 
-**Arguments:**
-- `DIR`: Working directory containing STRU, INPUT with lr_nstates (and optionally KPT) files
-- `ABACUS`: Path to the ABACUS executable
-- `--dx DX`: Displacement distance in Angstrom (default: 0.001)
-
-**Example:**
-```bash
-abacus-fd kslr-all /path/to/dir /path/to/abacus
+**Python equivalent:**
+```python
+from abacus_fd import run_diff_custom_lr
+run_diff_custom_lr(dir=".", abacus_path="abacus", diffed_atom_indices=[1], axes=['z'], dx=0.001, skip_groundstate=False)
 ```
+
+**Examples:**
+```bash
+abacus-fd lr-custom -i 0,1 --axes x,y,z
+abacus-fd lr-custom -d /path -i 5 --axes z --skip-gs
+```
+
+**Input files:** `STRU`, `INPUT_gs`, `INPUT_lr`(must set `lr_nstates`, `esolver_type lr`)
 
 ---
 

@@ -1,6 +1,9 @@
 from ase.io import read, write
 import numpy as np
 import os, subprocess
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def grep_parameter_from_input(input_file, para_name):
@@ -149,7 +152,7 @@ def run_abacus(dir, abacus, nproc=1, log="log.txt"):
     )
 
 
-def run_diff_all_groundstate(dir, abacus_path, dx=0.001):
+def run_diff_all_groundstate(dir=".", abacus_path="abacus", dx=0.001):
     """Compute ground state forces for all atoms using finite difference.
 
     Args:
@@ -191,7 +194,7 @@ def run_diff_all_groundstate(dir, abacus_path, dx=0.001):
             os.system(f"cp {task_stru} {os.path.join(task_dir, 'STRU')}")
             if src_kpt is not None:
                 os.system(f"cp {src_kpt} {os.path.join(task_dir, 'KPT')}")
-            print(f"Running ABACUS SCF for atom {i} moved along {axis}...")
+            logger.info(f"Running ABACUS SCF for atom {i} moved along {axis}...")
             run_abacus(task_dir, abacus_path, log="gs.log")
 
     suffix = grep_parameter_from_input(src_input, "suffix")
@@ -211,7 +214,7 @@ def run_diff_all_groundstate(dir, abacus_path, dx=0.001):
     return forces
 
 
-def run_diff_all_lr(dir, abacus_path, dx=0.001, skip_groundstate=False):
+def run_diff_all_lr(dir=".", abacus_path="abacus", dx=0.001, skip_groundstate=False):
     """Compute linear response TDDFT excited state forces for all atoms.
 
     Args:
@@ -225,7 +228,7 @@ def run_diff_all_lr(dir, abacus_path, dx=0.001, skip_groundstate=False):
                           [0] = singlet forces, [1] = triplet forces
                           in eV/Angstrom.
         Output files: excited_forces.npy, excited_forces.txt
-        TXT format (columns): S/T(0=S,1=T)  state_idx  atom_idx  x  y  z
+        TXT format (columns): Singlet/Triplet  state_idx  atom_idx  x  y  z
     """
     dir = os.path.abspath(dir)
     assert os.path.exists(os.path.join(dir, "INPUT_lr")), "INPUT_lr file not found"
@@ -267,7 +270,7 @@ def run_diff_all_lr(dir, abacus_path, dx=0.001, skip_groundstate=False):
         os.system(f"cp {os.path.join(dir, 'INPUT_gs')} {os.path.join(dir, 'INPUT')}")
         ground_state_forces = run_diff_all_groundstate(dir, abacus_path, dx)
         os.system(f"rm {os.path.join(dir, 'INPUT')}")
-    print(
+    logger.info(
         "Ground state forces (from finite difference) for each atom: \n",
         ground_state_forces,
     )
@@ -296,13 +299,13 @@ def run_diff_all_lr(dir, abacus_path, dx=0.001, skip_groundstate=False):
             excitation_energies.append(energy)
         excitation_energies = np.array(excitation_energies).reshape(6, 2, nstates)
         lr_force = (excitation_energies[3:, :, :] - excitation_energies[:3, :, :]) / dx
-        print(
+        logger.info(
             f"LR forces for atom {i} along x for each singlet state: {lr_force[0, :, :].reshape(2, -1)[0, :]} eV/Å"
         )
-        print(
+        logger.info(
             f"LR forces for atom {i} along y for each triplet state: {lr_force[1, :, :].reshape(2, -1)[1, :]} eV/Å"
         )
-        print(
+        logger.info(
             f"LR forces for atom {i} along z for each singlet state: {lr_force[2, :, :].reshape(2, -1)[0, :]} eV/Å"
         )
         excited_state_forces[i] = lr_force + ground_state_forces[i][:, None, None]
@@ -311,12 +314,12 @@ def run_diff_all_lr(dir, abacus_path, dx=0.001, skip_groundstate=False):
 
     npy_file = os.path.join(dir, "excited_forces.npy")
     np.save(npy_file, excited_state_forces)
-    print(f"Saved forces to {npy_file}")
+    logger.info(f"Saved forces to {npy_file}")
 
     txt_file = os.path.join(dir, "excited_forces.txt")
     st_labels = ["S", "T"]
     with open(txt_file, "w") as f:
-        f.write("# S/T(0=S,1=T)  state_idx  atom_idx  x  y  z\n")
+        f.write("# Singlet/Triplet  state_idx  atom_idx  x  y  z\n")
         for st in range(2):
             for istate in range(nstates):
                 for iatom in range(natoms):
@@ -324,16 +327,18 @@ def run_diff_all_lr(dir, abacus_path, dx=0.001, skip_groundstate=False):
                     f.write(
                         f"{st_labels[st]}  {istate}  {iatom}  {fx:.6f}  {fy:.6f}  {fz:.6f}\n"
                     )
-    print(f"Saved forces to {txt_file}")
+    logger.info(f"Saved forces to {txt_file}")
 
-    print(
+    logger.info(
         "Excited state forces (from finite difference) for each atom: \n",
         excited_state_forces,
     )
     return excited_state_forces
 
 
-def run_diff_custom_groundstate(dir, abacus_path, diffed_atom_indices, axes, dx=0.001):
+def run_diff_custom_groundstate(
+    dir=".", abacus_path="abacus", *, diffed_atom_indices, axes, dx=0.001
+):
     """Compute ground state forces for custom atoms using finite difference.
 
     Args:
@@ -377,7 +382,7 @@ def run_diff_custom_groundstate(dir, abacus_path, diffed_atom_indices, axes, dx=
             os.system(f"cp {task_stru} {os.path.join(task_dir, 'STRU')}")
             if src_kpt is not None:
                 os.system(f"cp {src_kpt} {os.path.join(task_dir, 'KPT')}")
-            print(f"Running ABACUS SCF for atom {i} moved along {axis}...")
+            logger.info(f"Running ABACUS SCF for atom {i} moved along {axis}...")
             run_abacus(task_dir, abacus_path, log="gs.log")
 
     suffix = grep_parameter_from_input(src_input, "suffix")
@@ -401,7 +406,13 @@ def run_diff_custom_groundstate(dir, abacus_path, diffed_atom_indices, axes, dx=
 
 
 def run_diff_custom_lr(
-    dir, abacus_path, diffed_atom_indices, axes, dx=0.001, skip_groundstate=False
+    dir=".",
+    abacus_path="abacus",
+    *,
+    diffed_atom_indices,
+    axes,
+    dx=0.001,
+    skip_groundstate=False,
 ):
     """Compute linear response TDDFT excited state forces for custom atoms.
 
@@ -469,7 +480,7 @@ def run_diff_custom_lr(
             os.system(f"cp {task_stru} {os.path.join(task_dir, 'STRU')}")
             if src_kpt is not None:
                 os.system(f"cp {src_kpt} {os.path.join(task_dir, 'KPT')}")
-            print(f"Running ABACUS LR for atom {i} moved along {axis}...")
+            logger.info(f"Running ABACUS LR for atom {i} moved along {axis}...")
             run_abacus(task_dir, abacus_path, log="lr.log")
 
     excited_state_forces = {}
@@ -484,17 +495,19 @@ def run_diff_custom_lr(
                 )
                 energies.append(energy)
             lr_force = (np.array(energies[1]) - np.array(energies[0])) / dx
-            print(
+            logger.info(
                 f"LR forces for atom {i} along {axis} for each singlet state: {lr_force.reshape(2, -1)[0, :]} eV/Å"
             )
-            print(
+            logger.info(
                 f"LR forces for atom {i} along {axis} for each triplet state: {lr_force.reshape(2, -1)[1, :]} eV/Å"
             )
             excited_state_forces[i][axis] = lr_force + ground_state_forces[i][axis]
     return excited_state_forces
 
 
-def run_diff_custom_kslr(dir, abacus_path, diffed_atom_indices, axes, dx=0.001):
+def run_diff_custom_kslr(
+    dir=".", abacus_path="abacus", *, diffed_atom_indices, axes, dx=0.001
+):
     """Compute excited state forces using Kohn-Sham linear response for custom atoms.
 
     Args:
@@ -538,7 +551,7 @@ def run_diff_custom_kslr(dir, abacus_path, diffed_atom_indices, axes, dx=0.001):
             os.system(f"cp {task_stru} {os.path.join(task_dir, 'STRU')}")
             if src_kpt is not None:
                 os.system(f"cp {src_kpt} {os.path.join(task_dir, 'KPT')}")
-            print(f"Running ABACUS SCF for atom {i} moved along {axis}...")
+            logger.info(f"Running ABACUS SCF for atom {i} moved along {axis}...")
             run_abacus(task_dir, abacus_path, log="ks-lr.log")
 
     suffix = grep_parameter_from_input(src_input, "suffix")
@@ -561,7 +574,7 @@ def run_diff_custom_kslr(dir, abacus_path, diffed_atom_indices, axes, dx=0.001):
                 energies.append(energy)
             force = np.array((energies[1] - energies[0])) / dx
             ground_state_forces[i][axis] = force
-    print(
+    logger.info(
         "Ground state forces (from finite difference) for each atom: \n",
         ground_state_forces,
     )
@@ -578,17 +591,17 @@ def run_diff_custom_kslr(dir, abacus_path, diffed_atom_indices, axes, dx=0.001):
                 )
                 energies.append(energy)
             lr_force = (np.array(energies[1]) - np.array(energies[0])) / dx
-            print(
+            logger.info(
                 f"LR forces for atom {i} along {axis} for each singlet state: {lr_force.reshape(2, -1)[0, :]} eV/Å"
             )
-            print(
+            logger.info(
                 f"LR forces for atom {i} along {axis} for each triplet state: {lr_force.reshape(2, -1)[1, :]} eV/Å"
             )
             excited_state_forces[i][axis] = lr_force + ground_state_forces[i][axis]
     return excited_state_forces
 
 
-def run_diff_all_kslr(dir, abacus_path, dx=0.001):
+def run_diff_all_kslr(dir=".", abacus_path="abacus", dx=0.001):
     """Compute excited state forces using Kohn-Sham linear response for all atoms.
 
     Args:
@@ -601,7 +614,7 @@ def run_diff_all_kslr(dir, abacus_path, dx=0.001):
                           [0] = singlet forces, [1] = triplet forces
                           in eV/Angstrom.
         Output files: excited_forces.npy, excited_forces.txt
-        TXT format (columns): S/T(0=S,1=T)  state_idx  atom_idx  x  y  z
+        TXT format (columns): Singlet/Triplet  state_idx  atom_idx  x  y  z
     """
     dir = os.path.abspath(dir)
     assert os.path.exists(os.path.join(dir, "INPUT")), "INPUT file not found"
@@ -634,7 +647,7 @@ def run_diff_all_kslr(dir, abacus_path, dx=0.001):
             os.system(f"cp {task_stru} {os.path.join(task_dir, 'STRU')}")
             if src_kpt is not None:
                 os.system(f"cp {src_kpt} {os.path.join(task_dir, 'KPT')}")
-            print(f"Running ABACUS SCF for atom {i} moved along {axis}...")
+            logger.info(f"Running ABACUS SCF for atom {i} moved along {axis}...")
             run_abacus(task_dir, abacus_path, log="ks-lr.log")
 
     suffix = grep_parameter_from_input(src_input, "suffix")
@@ -667,13 +680,13 @@ def run_diff_all_kslr(dir, abacus_path, dx=0.001):
             excitation_energies.append(energy)
         excitation_energies = np.array(excitation_energies).reshape(6, 2, nstates)
         lr_force = (excitation_energies[3:, :, :] - excitation_energies[:3, :, :]) / dx
-        print(
+        logger.info(
             f"LR forces for atom {i} along x for each singlet state: {lr_force[0, :, :].reshape(2, -1)[0, :]} eV/Å"
         )
-        print(
+        logger.info(
             f"LR forces for atom {i} along y for each triplet state: {lr_force[1, :, :].reshape(2, -1)[1, :]} eV/Å"
         )
-        print(
+        logger.info(
             f"LR forces for atom {i} along z for each singlet state: {lr_force[2, :, :].reshape(2, -1)[0, :]} eV/Å"
         )
         excited_state_forces[i] = lr_force + ground_state_forces[i][:, None, None]
@@ -682,7 +695,7 @@ def run_diff_all_kslr(dir, abacus_path, dx=0.001):
 
     npy_file = os.path.join(dir, "excited_forces.npy")
     np.save(npy_file, excited_state_forces)
-    print(f"Saved forces to {npy_file}")
+    logger.info(f"Saved forces to {npy_file}")
 
     txt_file = os.path.join(dir, "excited_forces.txt")
     st_labels = ["S", "T"]
@@ -695,9 +708,9 @@ def run_diff_all_kslr(dir, abacus_path, dx=0.001):
                     f.write(
                         f"{st_labels[st]}  {istate}  {iatom}  {fx:.6f}  {fy:.6f}  {fz:.6f}\n"
                     )
-    print(f"Saved forces to {txt_file}")
+    logger.info(f"Saved forces to {txt_file}")
 
-    print(
+    logger.info(
         "Excited state forces (from finite difference) for each atom: \n",
         excited_state_forces,
     )
