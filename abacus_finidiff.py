@@ -14,7 +14,17 @@ def grep_groundstate_energy_from_log(log):
     """grep groundstate energy (eV) from abacus log file"""
     command=f"grep '!FINAL_ETOT_IS' {log} | awk '{{print $2}}'"
     text=subprocess.run(command, shell=True, capture_output=True).stdout.decode().strip().strip('\n')
-    return float(text)
+    try:
+        e = float(text)
+    except ValueError:
+        # read the last E_KohnSham (eV)
+        command = f"grep 'E_KohnSham' {log} | tail -n 1 | awk '{{print $3}}'"
+        text = subprocess.run(command, shell=True, capture_output=True).stdout.decode().strip().strip('\n')
+        try:
+            e=float(text)
+        except ValueError:
+            raise ValueError(f"Cannot parse energy from log file {log}. Please check the log file for errors.")
+    return e
 
 def grep_excitation_energy_from_log(log, nstate):
     """grep LR-TDDFT excitation energy (eV) from abacus log file"""
@@ -123,7 +133,7 @@ def run_diff_all_groundstate(dir, abacus_path, dx=0.001):
     # 2. run ABACUS for each diffed STRU file
     points_dir = os.path.join(dir, "points")
     os.makedirs(points_dir, exist_ok=True)
-    forces=[]
+
     for i in range(natoms):
         for axis in ['x', 'y', 'z', '-x', '-y', '-z']:
             task_name = f"STRU_{i}_{axis}"
@@ -183,7 +193,7 @@ def run_diff_all_lr(dir, abacus_path, dx=0.001, skip_groundstate=False):
         nstates = 1
         
     # 1. prepare diffed STRU files and groundstates
-    forces_gs = np.zeros((natoms, 3))
+    ground_state_forces = np.zeros((natoms, 3))
     if skip_groundstate:
         for i in range(natoms):
             energies = []
@@ -194,12 +204,12 @@ def run_diff_all_lr(dir, abacus_path, dx=0.001, skip_groundstate=False):
                 energy=grep_groundstate_energy_from_log(task_scf_log)
                 energies.append(energy)
             force = (np.array((energies[3:]) - np.array(energies[:3])))/dx    # F=-dE/dx
-            forces_gs[i] = force
+            ground_state_forces[i] = force
     else: 
         os.system(f"cp {os.path.join(dir, 'INPUT_gs')} {os.path.join(dir, 'INPUT')}")
-        forces_gs = run_diff_all_groundstate(dir, abacus_path, dx)
+        ground_state_forces = run_diff_all_groundstate(dir, abacus_path, dx)
         os.system(f"rm {os.path.join(dir, 'INPUT')}")   # remove the copied INPUT file
-    print("Ground state forces (from finite difference) for each atom: \n", forces_gs)
+    print("Ground state forces (from finite difference) for each atom: \n", ground_state_forces)
 
     # 2. run ABACUS LR for each diffed STRU file
     for i in range(natoms):
@@ -229,7 +239,7 @@ def run_diff_all_lr(dir, abacus_path, dx=0.001, skip_groundstate=False):
         print(f"LR forces (minus excited states energy gradients) for atom {i} along x for each singlet state: {lr_force[0, :, :].reshape(2,-1)[0,:]} eV/Å")
         print(f"LR forces (minus excited states energy gradients) for atom {i} along y for each triplet state: {lr_force[1, :, :].reshape(2,-1)[1,:]} eV/Å")
         print(f"LR forces (minus excited states energy gradients) for atom {i} along z for each singlet state: {lr_force[2, :, :].reshape(2,-1)[0,:]} eV/Å")
-        excited_state_forces[i] = lr_force + forces_gs[i][:, None, None]   # add groundstate forces to get total forces in excited states
+        excited_state_forces[i] = lr_force + ground_state_forces[i][:, None, None]   # add groundstate forces to get total forces in excited states
     print("Excited state forces (from finite difference) for each atom: \n", excited_state_forces)
     return excited_state_forces
 
@@ -252,7 +262,7 @@ def run_diff_custom_groundstate(dir, abacus_path, diffed_atom_indices, axes, dx=
     # 2. run ABACUS for each diffed STRU file
     points_dir = os.path.join(dir, "points")
     os.makedirs(points_dir, exist_ok=True)
-    forces=[]
+
     for i in diffed_atom_indices:
         for axis in axes + ['-'+axis for axis in axes]:
             task_name = f"STRU_{i}_{axis}"
@@ -362,15 +372,155 @@ def run_diff_custom_lr(dir, abacus_path,  diffed_atom_indices, axes, dx=0.001, s
             excited_state_forces[i][axis] = lr_force + ground_state_forces[i][axis]   # add groundstate forces to get total forces in excited states
     return excited_state_forces
 
+def run_diff_custom_kslr(dir, abacus_path, diffed_atom_indices, axes, dx=0.001):
+    """dir should contain the original STRU, INPUT and KPT (optional) files.
+    abacus_dir is the path to the ABACUS executable."""
+    dir = os.path.abspath(dir)
+    assert os.path.exists(os.path.join(dir, "INPUT")), "INPUT file not found"
+    assert os.path.exists(os.path.join(dir, "STRU")), "STRU file not found"
+    src_stru=os.path.join(dir, "STRU")
+    src_input=os.path.join(dir, "INPUT")
+    src_kpt=None
+    if os.path.exists(os.path.join(dir, "KPT")):
+        src_kpt=os.path.join(dir, "KPT")
+        
+    # 1. prepare diffed STRU files
+    prepare_diff_custom(src_stru, diffed_atom_indices, axes, dx=dx, output_dir=os.path.join(dir, "moved_STRU"), central=True)
+    
+    # 2. run ABACUS for each diffed STRU file
+    points_dir = os.path.join(dir, "points")
+    os.makedirs(points_dir, exist_ok=True)
+
+    for i in diffed_atom_indices:
+        for axis in axes + ['-'+axis for axis in axes]:
+            task_name = f"STRU_{i}_{axis}"
+            task_stru=os.path.join(dir, "moved_STRU", task_name)
+            task_dir = os.path.join(points_dir, task_name)
+            os.makedirs(task_dir, exist_ok=True)
+            os.system(f"cp {src_input} {os.path.join(task_dir, 'INPUT')}")
+            os.system(f"cp {task_stru} {os.path.join(task_dir, 'STRU')}")
+            if src_kpt is not None:
+                os.system(f"cp {src_kpt} {os.path.join(task_dir, 'KPT')}")
+            print(f"Running ABACUS SCF for atom {i} moved along {axis}...")
+            run_abacus(task_dir, abacus_path, log="ks-lr.log")
+
+    # 3. get forces
+    suffix = grep_parameter_from_input(src_input, "suffix") 
+    if suffix is None or suffix == "":
+        suffix = "ABACUS"
+    nstates = int(grep_parameter_from_input(src_input, "lr_nstates"))
+    if nstates is None:
+        nstates = 1
+    ground_state_forces = {}
+    for i in diffed_atom_indices:
+        ground_state_forces[i] = {}
+        for axis in axes:
+            energies = []
+            for task_name in [f"STRU_{i}_{axis}", f"STRU_{i}_{'-'+axis}"]:
+                task_dir = os.path.join(points_dir, task_name)
+                task_scf_log = os.path.join(task_dir, f"OUT.{suffix}", "running_scf.log")
+                energy=grep_groundstate_energy_from_log(task_scf_log)
+                energies.append(energy)
+            force = np.array((energies[1] - energies[0]))/dx    # F=-dE/dx
+            ground_state_forces[i][axis] = force
+    print("Ground state forces (from finite difference) for each atom: \n", ground_state_forces)
+    
+    excited_state_forces = {}
+    for i in diffed_atom_indices:
+        for axis in axes:
+            energies = []
+            excited_state_forces[i] = {}
+            for task_name in [f"STRU_{i}_{axis}", f"STRU_{i}_{'-'+axis}"]:
+                task_dir = os.path.join(points_dir, task_name)
+                energy = grep_excitation_energy_from_log(os.path.join(task_dir, f"OUT.{suffix}", "running_scf.log"), nstates)
+                energies.append(energy) # len: nstates*2(singlet/triplet)
+            lr_force = (np.array(energies[1]) - np.array(energies[0]))/dx    # -d\Omega/dx
+            print(f"LR forces (minus excited states energy gradients) for atom {i} along {axis} for each singlet state: {lr_force.reshape(2,-1)[0,:]} eV/Å")
+            print(f"LR forces (minus excited states energy gradients) for atom {i} along {axis} for each triplet state: {lr_force.reshape(2,-1)[1,:]} eV/Å")
+            excited_state_forces[i][axis] = lr_force + ground_state_forces[i][axis]   # add groundstate forces to get total forces in excited states
+    return excited_state_forces
+
+def run_diff_all_kslr(dir, abacus_path, dx=0.001):
+    """dir should contain the original STRU, INPUT and KPT (optional) files.
+    abacus_dir is the path to the ABACUS executable."""
+    dir = os.path.abspath(dir)
+    assert os.path.exists(os.path.join(dir, "INPUT")), "INPUT file not found"
+    assert os.path.exists(os.path.join(dir, "STRU")), "STRU file not found"
+    src_stru=os.path.join(dir, "STRU")
+    src_input=os.path.join(dir, "INPUT")
+    src_kpt=None
+    if os.path.exists(os.path.join(dir, "KPT")):
+        src_kpt=os.path.join(dir, "KPT")
+        
+    # 1. prepare diffed STRU files
+    prepare_diff_all(src_stru=src_stru, dx=dx, output_dir=os.path.join(dir, "moved_STRU"), central=True)
+    atoms = read(src_stru, format='abacus')
+    natoms = len(atoms)
+    
+    # 2. run ABACUS for each diffed STRU file
+    points_dir = os.path.join(dir, "points")
+    os.makedirs(points_dir, exist_ok=True)
+
+    for i in range(natoms):
+        for axis in ['x', 'y', 'z', '-x', '-y', '-z']:
+            task_name = f"STRU_{i}_{axis}"
+            task_stru=os.path.join(dir, "moved_STRU", task_name)
+            task_dir = os.path.join(points_dir, task_name)
+            os.makedirs(task_dir, exist_ok=True)
+            os.system(f"cp {src_input} {os.path.join(task_dir, 'INPUT')}")
+            os.system(f"cp {task_stru} {os.path.join(task_dir, 'STRU')}")
+            if src_kpt is not None:
+                os.system(f"cp {src_kpt} {os.path.join(task_dir, 'KPT')}")
+            print(f"Running ABACUS SCF for atom {i} moved along {axis}...")
+            run_abacus(task_dir, abacus_path, log="ks-lr.log")
+
+    # 3. get forces
+    suffix = grep_parameter_from_input(src_input, "suffix") 
+    if suffix is None or suffix == "":
+        suffix = "ABACUS"
+    nstates = int(grep_parameter_from_input(src_input, "lr_nstates"))
+    if nstates is None:
+        nstates = 1
+    ground_state_forces = np.zeros((natoms, 3))
+    for i in range(natoms):
+        energies = []
+        for axis in ['x', 'y', 'z', '-x', '-y', '-z']:
+            task_name = f"STRU_{i}_{axis}"
+            task_dir = os.path.join(points_dir, task_name)
+            task_scf_log = os.path.join(task_dir, f"OUT.{suffix}", "running_scf.log")
+            energy=grep_groundstate_energy_from_log(task_scf_log)
+            energies.append(energy)
+        force = (np.array((energies[3:]) - np.array(energies[:3])))/dx    # F=-dE/dx
+        ground_state_forces[i] = force
+
+    excited_state_forces = np.zeros((natoms, 3, 2, nstates))   # 2 for singlet and triplet
+    for i in range(natoms):
+        excitation_energies = []
+        for axis in ['x', 'y', 'z', '-x', '-y', '-z']:
+            task_name = f"STRU_{i}_{axis}"
+            task_dir = os.path.join(points_dir, task_name)
+            energy = grep_excitation_energy_from_log(os.path.join(task_dir, f"OUT.{suffix}", "running_scf.log"), nstates)
+            excitation_energies.append(energy)  # len: nstates*2(singlet/triplet)
+        excitation_energies = np.array(excitation_energies).reshape(6, 2, nstates)   # 6 for +x, +y, +z, -x, -y, -z
+        lr_force = (excitation_energies[3:, :, :] - excitation_energies[:3, :, :])/dx    # -d\Omega/dx
+        print(f"LR forces (minus excited states energy gradients) for atom {i} along x for each singlet state: {lr_force[0, :, :].reshape(2,-1)[0,:]} eV/Å")
+        print(f"LR forces (minus excited states energy gradients) for atom {i} along y for each triplet state: {lr_force[1, :, :].reshape(2,-1)[1,:]} eV/Å")
+        print(f"LR forces (minus excited states energy gradients) for atom {i} along z for each singlet state: {lr_force[2, :, :].reshape(2,-1)[0,:]} eV/Å")
+        excited_state_forces[i] = lr_force + ground_state_forces[i][:, None, None]   # add groundstate forces to get total forces in excited states
+    print("Excited state forces (from finite difference) for each atom: \n", excited_state_forces)
+    return excited_state_forces
+
+
 if __name__ == "__main__":
 
     # abacus_path = "/home/fortneu49/LR-Grad/abacus-develop/build/abacus" # LTS
     abacus_path = "/home/fortneu49/abacus-fix/abacus-develop/build/abacus_3p"   #develop
     
     # For a single atom
-    forces = run_diff_custom_lr(dir=".", abacus_path=abacus_path, diffed_atom_indices=[1], axes=['z'], dx=0.001, skip_groundstate=False)
+    # forces = run_diff_custom_lr(dir=".", abacus_path=abacus_path, diffed_atom_indices=[1], axes=['z'], dx=0.001, skip_groundstate=True)
+    # forces = run_diff_custom_kslr(dir=".", abacus_path=abacus_path, diffed_atom_indices=[1], axes=['z'], dx=0.001)
     
     # For all atoms
     # forces = run_diff_all_lr(dir=".", abacus_path=abacus_path, dx=0.001, skip_groundstate=False)
-    
+    forces = run_diff_all_lr(dir=".", abacus_path=abacus_path, dx=0.001)
     print("forces = ", forces)
