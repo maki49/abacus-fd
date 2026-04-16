@@ -26,7 +26,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Physics",
 ]
 dependencies = [
-    "ase",
+    "ase @ git+https://gitlab.com/1041176461/ase-abacus.git",
     "numpy",
 ]
 

@@ -1,9 +1,32 @@
 from ase.io import read, write
+from ase.io.formats import UnknownFileTypeError
 import numpy as np
 import os, subprocess
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _read_abacus(path):
+    """Read ABACUS STRU file via ASE with a clear dependency error."""
+    try:
+        return read(path, format="abacus")
+    except UnknownFileTypeError as exc:
+        raise RuntimeError(
+            "ASE format 'abacus' is unavailable. Please install ASE with ABACUS "
+            "format support in the current Python environment."
+        ) from exc
+
+
+def _write_abacus(path, atoms, scaled=False):
+    """Write ABACUS STRU file via ASE with a clear dependency error."""
+    try:
+        write(path, atoms, format="abacus", scaled=scaled)
+    except UnknownFileTypeError as exc:
+        raise RuntimeError(
+            "ASE format 'abacus' is unavailable. Please install ASE with ABACUS "
+            "format support in the current Python environment."
+        ) from exc
 
 
 def grep_parameter_from_input(input_file, para_name):
@@ -61,12 +84,22 @@ def move_an_atom_in_stru(src, dest, atom_index, dr, scaled=False):
     """Move an atom in the `src` STRU file by a specified distance (in Angstrom), and write the modified STRU file to `dest`."""
     src = os.path.abspath(src)
     dest = os.path.abspath(dest)
-    atoms = read(src, format="abacus")
+    atoms = _read_abacus(src)
     positions = atoms.get_positions()
     positions[atom_index] += np.array(dr)
     atoms.set_positions(positions)
+    orb = subprocess.run(f"grep 'NUMERICAL_ORBITAL' -A 1 {src} | tail -n 1", shell=True, capture_output=True).stdout.decode().strip().strip("\n")
+    _write_abacus(dest, atoms, scaled=scaled)
+    with open(dest, "r") as f:
+        lines = f.readlines()
+    for i, line in enumerate(lines):
+        if line.strip() == "NUMERICAL_ORBITAL":
+            lines[i + 1] = f"{orb}\n"
+            break
+    with open(dest, "w") as f:
+        for line in lines:
+            f.write(line)
 
-    write(dest, atoms, format="abacus", scaled=scaled)
 
 
 def prepare_diff_all(src_stru, dx, output_dir="moved_STRU", central=True):
@@ -81,7 +114,7 @@ def prepare_diff_all(src_stru, dx, output_dir="moved_STRU", central=True):
     os.makedirs(output_dir, exist_ok=True)
     src_stru = os.path.abspath(src_stru)
     output_dir = os.path.abspath(output_dir)
-    atoms = read(src_stru, format="abacus")
+    atoms = _read_abacus(src_stru)
     natoms = len(atoms)
     if central:
         direction_vecs = {
@@ -178,7 +211,7 @@ def run_diff_all_groundstate(dir=".", abacus_path="abacus", dx=0.001):
         output_dir=os.path.join(dir, "moved_STRU"),
         central=True,
     )
-    atoms = read(src_stru, format="abacus")
+    atoms = _read_abacus(src_stru)
     natoms = len(atoms)
 
     points_dir = os.path.join(dir, "points")
@@ -239,7 +272,7 @@ def run_diff_all_lr(dir=".", abacus_path="abacus", dx=0.001, skip_groundstate=Fa
     src_kpt = None
     if os.path.exists(os.path.join(dir, "KPT")):
         src_kpt = os.path.join(dir, "KPT")
-    atoms = read(src_stru, format="abacus")
+    atoms = _read_abacus(src_stru)
     natoms = len(atoms)
     points_dir = os.path.join(dir, "points")
     if not os.path.exists(points_dir):
@@ -436,7 +469,7 @@ def run_diff_custom_lr(
     src_kpt = None
     if os.path.exists(os.path.join(dir, "KPT")):
         src_kpt = os.path.join(dir, "KPT")
-    atoms = read(src_stru, format="abacus")
+    atoms = _read_abacus(src_stru)
     natoms = len(atoms)
     points_dir = os.path.join(dir, "points")
     os.makedirs(points_dir, exist_ok=True)
@@ -466,7 +499,7 @@ def run_diff_custom_lr(
     else:
         os.system(f"cp {os.path.join(dir, 'INPUT_gs')} {os.path.join(dir, 'INPUT')}")
         ground_state_forces = run_diff_custom_groundstate(
-            dir, abacus_path, diffed_atom_indices, axes, dx
+            dir, abacus_path, diffed_atom_indices=diffed_atom_indices, axes=axes, dx=dx
         )
         os.system(f"rm {os.path.join(dir, 'INPUT')}")
 
@@ -631,7 +664,7 @@ def run_diff_all_kslr(dir=".", abacus_path="abacus", dx=0.001):
         output_dir=os.path.join(dir, "moved_STRU"),
         central=True,
     )
-    atoms = read(src_stru, format="abacus")
+    atoms = _read_abacus(src_stru)
     natoms = len(atoms)
 
     points_dir = os.path.join(dir, "points")

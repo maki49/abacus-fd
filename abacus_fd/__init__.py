@@ -212,11 +212,18 @@ def main():
         return
 
     if args.command == "gs-all":
-        forces = run_diff_all_groundstate(args.dir, args.abacus, args.dx)
+        forces = run_diff_all_groundstate(
+            dir=args.dir, abacus_path=args.abacus, dx=args.dx
+        )
         logger.info("Forces (eV/Angstrom):\n%s", forces)
 
     elif args.command == "lr-all":
-        forces = run_diff_all_lr(args.dir, args.abacus, args.dx, args.skip_gs)
+        forces = run_diff_all_lr(
+            dir=args.dir,
+            abacus_path=args.abacus,
+            dx=args.dx,
+            skip_groundstate=args.skip_gs,
+        )
         logger.info("Excited state forces:\n%s", forces)
 
     elif args.command == "gs-custom":
@@ -249,7 +256,7 @@ def main():
         logger.info("Excited state forces:\n%s", forces)
 
     elif args.command == "kslr-all":
-        forces = run_diff_all_kslr(args.dir, args.abacus, args.dx)
+        forces = run_diff_all_kslr(dir=args.dir, abacus_path=args.abacus, dx=args.dx)
         logger.info("Excited state forces:\n%s", forces)
 
 

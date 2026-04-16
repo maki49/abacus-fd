@@ -17,6 +17,7 @@ pip install -e .
 ## Dependencies
 
 - `ase` (Atomic Simulation Environment) for reading/writing ABACUS STRU files
+- `ase` with ABACUS IO support (auto-installed from `https://gitlab.com/1041176461/ase-abacus.git` by `pip install .`)
 - `numpy`
 - ABACUS executable (external, not included)
 
