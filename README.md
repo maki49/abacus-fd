@@ -1,6 +1,8 @@
 # ABACUS Finite Difference (abacus-fd)
 
-A Python library for computing forces (unit: eV/Angstrom) via finite difference with ABACUS DFT software.
+A Python library for computing forces (unit: eV/Angstrom) and electronic states via finite difference with ABACUS DFT software. 
+
+This tool is specifically optimized for **FSSH (Fewest Switches Surface Hopping)** workflows, allowing ABACUS to delegate intensive SCF and LR-TDDFT calculations to a task-parallelized external process.
 
 ## Installation
 
@@ -33,6 +35,7 @@ abacus-fd --help
 |---------|-------------|-------|------------|
 | `kslr-all` | KSDFT + LR-TDDFT excited state forces | All atoms | x, y, z |
 | `kslr-custom` | KSDFT + LR-TDDFT excited state forces | Specified | Specified |
+| `kslr-states` | Single point SCF + LR-TDDFT (for WFC/Amplitudes) | 1 config | N/A |
 | `gs-all` | Ground state forces | All atoms | x, y, z |
 | `gs-custom` | Ground state forces | Specified | Specified |
 | `lr-all` | LR-TDDFT excited state forces | All atoms | x, y, z |
@@ -50,8 +53,24 @@ abacus-fd --help
 | `-d` | `--dir` | Working directory | Current dir |
 | `-a` | `--abacus` | ABACUS executable path | `abacus` |
 | `-x` | `--dx` | Displacement (Angstrom) | `0.001` |
+| `-n` | `--nproc` | MPI ranks **per task** | `1` |
+| `-j` | `--nparallel` | Number of **concurrent tasks** | `1` |
 | `-i` | `--indices` | Atom indices (comma-separated) | - |
 | `-s` | `--skip-gs` | Skip ground state calculation | False |
+
+## Parallelism and Resource Management
+
+`abacus-fd` supports two levels of parallelism:
+1. **Task-level parallelism (`-j / --nparallel`)**: Uses Python's `ProcessPoolExecutor` to run multiple atomic displacement configurations simultaneously.
+2. **MPI-level parallelism (`-n / --nproc`)**: Uses `mpirun -np <nproc>` to run each individual ABACUS instance.
+
+**Best Practice:**
+Ensure your total core count matches the product: 
+`Total Cores >= nparallel * nproc`.
+
+For small systems (like LiH), it is often more efficient to use higher `nparallel` and `nproc=1` to avoid MPI overhead and potential numerical instabilities in ScaLAPACK.
+
+---
 
 ### kslr-all
 
@@ -59,13 +78,13 @@ KSDFT + LR-TDDFT excited state forces for all atoms along x/y/z.
 
 **Usage:**
 ```bash
-abacus-fd kslr-all [-d DIR] [-a ABACUS] [-x DX]
+abacus-fd kslr-all [-d DIR] [-a ABACUS] [-x DX] [-n NPROC] [-j NPARALLEL]
 ```
 
 **Examples:**
 ```bash
-abacus-fd kslr-all
-abacus-fd kslr-all -d /path/to/dir -a /path/to/abacus -x 0.001
+# Run 4 concurrent tasks, each task using 1 core
+abacus-fd kslr-all -j 4 -n 1
 ```
 
 **Input files:** `STRU`, `INPUT` (must set `lr_nstates`, `esolver_type ks-lr`)
@@ -73,6 +92,22 @@ abacus-fd kslr-all -d /path/to/dir -a /path/to/abacus -x 0.001
 **Output files:**
 - `excited_forces.npy`: numpy array, shape `(2, nstates, natoms, 3)`
 - `excited_forces.txt`: text format, columns `S/T  state_idx  atom_idx  x  y  z`
+
+---
+
+### kslr-states
+
+Runs a single ABACUS calculation (SCF + LR-TDDFT) and outputs wavefunctions and excitation amplitudes. This is used by the FSSH "hijack" logic to sync electronic states.
+
+**Usage:**
+```bash
+abacus-fd kslr-states [-d DIR] [-a ABACUS] [-n NPROC]
+```
+
+**Output:**
+- `wf_nao.txt`: LCAO wavefunctions.
+- `Excitation_Amplitude_singlet_*.dat`: Casida X coefficients for each rank.
+- `Excitation_Energy_singlet.dat`: Excitation energies.
 
 ---
 
@@ -82,115 +117,14 @@ KSDFT + LR-TDDFT excited state forces for specified atoms and directions.
 
 **Usage:**
 ```bash
-abacus-fd kslr-custom [-d DIR] [-a ABACUS] -i INDICES --axes AXES [-x DX]
+abacus-fd kslr-custom [-d DIR] [-a ABACUS] -i INDICES --axes AXES [-x DX] [-n NPROC] [-j NPARALLEL]
 ```
-
-**Python equivalent:**
-```python
-from abacus_fd import run_diff_custom_kslr
-run_diff_custom_kslr(dir=".", abacus_path="abacus", diffed_atom_indices=[0, 1], axes=['x', 'y'], dx=0.001)
-```
-
-**Examples:**
-```bash
-abacus-fd kslr-custom -i 0,1 --axes x,y
-abacus-fd kslr-custom -d /path -a /abacus -i 5 --axes z
-```
-
-**Input files:** `STRU`, `INPUT` (must set `lr_nstates`, `esolver_type ks-lr`)
 
 ---
 
-### gs-all
+### gs-all / gs-custom
 
-Ground state forces for all atoms along x/y/z.
-
-**Usage:**
-```bash
-abacus-fd gs-all [-d DIR] [-a ABACUS] [-x DX]
-```
-
-**Examples:**
-```bash
-abacus-fd gs-all
-abacus-fd gs-all -d /path/to/dir -x 0.001
-```
-
-**Input files:** `STRU`, `INPUT`
-
----
-
-### gs-custom
-
-Ground state forces for specified atoms and directions.
-
-**Usage:**
-```bash
-abacus-fd gs-custom [-d DIR] [-a ABACUS] -i INDICES --axes AXES [-x DX]
-```
-
-**Python equivalent:**
-```python
-from abacus_fd import run_diff_custom_groundstate
-run_diff_custom_groundstate(dir=".", abacus_path="abacus", diffed_atom_indices=[0, 1, 2], axes=['x', 'y'], dx=0.001)
-```
-
-**Examples:**
-```bash
-abacus-fd gs-custom -i 0,1,2 --axes x,y
-abacus-fd gs-custom -d /path -i 5 --axes z
-```
-
-**Input files:** `STRU`, `INPUT`
-
----
-
-### lr-all
-
-LR-TDDFT excited state forces for all atoms along x/y/z.
-
-**Usage:**
-```bash
-abacus-fd lr-all [-d DIR] [-a ABACUS] [-x DX] [-s]
-```
-
-**Examples:**
-```bash
-abacus-fd lr-all
-abacus-fd lr-all -d /path -x 0.001
-abacus-fd lr-all -d /path --skip-gs
-```
-
-**Input files:** `STRU`, `INPUT_gs`, `INPUT_lr`(must set `lr_nstates`, `esolver_type lr`)
-
-**Output files:**
-- `excited_forces.npy`: numpy array, shape `(2, nstates, natoms, 3)`
-- `excited_forces.txt`: text format, columns `S/T  state_idx  atom_idx  x  y  z`
-
----
-
-### lr-custom
-
-LR-TDDFT excited state forces for specified atoms and directions.
-
-**Usage:**
-```bash
-abacus-fd lr-custom [-d DIR] [-a ABACUS] -i INDICES --axes AXES [-x DX] [-s]
-```
-
-**Python equivalent:**
-```python
-from abacus_fd import run_diff_custom_lr
-run_diff_custom_lr(dir=".", abacus_path="abacus", diffed_atom_indices=[1], axes=['z'], dx=0.001, skip_groundstate=False)
-```
-
-**Examples:**
-```bash
-abacus-fd lr-custom -i 0,1 --axes x,y,z
-abacus-fd lr-custom -d /path -i 5 --axes z --skip-gs
-```
-
-**Input files:** `STRU`, `INPUT_gs`, `INPUT_lr`(must set `lr_nstates`, `esolver_type lr`)
+Ground state forces using task-parallelized finite difference.
 
 ---
 
@@ -200,6 +134,7 @@ abacus-fd lr-custom -d /path -i 5 --axes z --skip-gs
 - `lr-*` commands require both `INPUT_gs` and `INPUT_lr` files
 - Output suffix defaults to "ABACUS" if not specified in INPUT files
 - Atom indices are 0-based (first atom is index 0)
+- Environment Isolation: `abacus-fd` aggressively cleans MPI-related environment variables before spawning tasks to prevent nested MPI deadlocks.
 
 ## Testing
 
