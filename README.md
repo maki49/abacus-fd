@@ -122,9 +122,96 @@ abacus-fd kslr-custom [-d DIR] [-a ABACUS] -i INDICES --axes AXES [-x DX] [-n NP
 
 ---
 
-### gs-all / gs-custom
+### gs-all
 
-Ground state forces using task-parallelized finite difference.
+Ground state forces for all atoms along x/y/z.
+
+**Usage:**
+```bash
+abacus-fd gs-all [-d DIR] [-a ABACUS] [-x DX]
+```
+
+**Examples:**
+```bash
+abacus-fd gs-all
+abacus-fd gs-all -d /path/to/dir -x 0.001
+```
+
+**Input files:** `STRU`, `INPUT`
+
+---
+
+### gs-custom
+
+Ground state forces for specified atoms and directions.
+
+**Usage:**
+```bash
+abacus-fd gs-custom [-d DIR] [-a ABACUS] -i INDICES --axes AXES [-x DX]
+```
+
+**Python equivalent:**
+```python
+from abacus_fd import run_diff_custom_groundstate
+run_diff_custom_groundstate(dir=".", abacus_path="abacus", diffed_atom_indices=[0, 1, 2], axes=['x', 'y'], dx=0.001)
+```
+
+**Examples:**
+```bash
+abacus-fd gs-custom -i 0,1,2 --axes x,y
+abacus-fd gs-custom -d /path -i 5 --axes z
+```
+
+**Input files:** `STRU`, `INPUT`
+
+---
+
+### lr-all
+
+LR-TDDFT excited state forces for all atoms along x/y/z.
+
+**Usage:**
+```bash
+abacus-fd lr-all [-d DIR] [-a ABACUS] [-x DX] [-s]
+```
+
+**Examples:**
+```bash
+abacus-fd lr-all
+abacus-fd lr-all -d /path -x 0.001
+abacus-fd lr-all -d /path --skip-gs
+```
+
+**Input files:** `STRU`, `INPUT_gs`, `INPUT_lr`(must set `lr_nstates`, `esolver_type lr`)
+
+**Output files:**
+- `excited_forces.npy`: numpy array, shape `(2, nstates, natoms, 3)`
+- `excited_forces.txt`: text format, columns `S/T  state_idx  atom_idx  x  y  z`
+
+---
+
+### lr-custom
+
+LR-TDDFT excited state forces for specified atoms and directions.
+
+**Usage:**
+```bash
+abacus-fd lr-custom [-d DIR] [-a ABACUS] -i INDICES --axes AXES [-x DX] [-s]
+```
+
+**Python equivalent:**
+```python
+from abacus_fd import run_diff_custom_lr
+run_diff_custom_lr(dir=".", abacus_path="abacus", diffed_atom_indices=[1], axes=['z'], dx=0.001, skip_groundstate=False)
+```
+
+**Examples:**
+```bash
+abacus-fd lr-custom -i 0,1 --axes x,y,z
+abacus-fd lr-custom -d /path -i 5 --axes z --skip-gs
+```
+
+**Input files:** `STRU`, `INPUT_gs`, `INPUT_lr`(must set `lr_nstates`, `esolver_type lr`)
 
 ---
 
