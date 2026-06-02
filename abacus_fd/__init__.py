@@ -128,23 +128,29 @@ def main():
     p.add_argument("-d", dest="dir", nargs="?", help="Working directory")
     p.add_argument("-a", "--abacus", default="abacus", help="Path to ABACUS binary")
     p.add_argument("-i", "--indices", required=True, help="Comma-separated atom indices (0-based)")
-    p.add_argument("--axes", required=True, help="Comma-separated axes (x,y,z)")
+    p.add_argument("-A", "--axes", required=True, help="Comma-separated axes (x,y,z)")
     p.add_argument("-x", "--dx", type=float, default=0.001, help="Displacement distance")
+    p.add_argument("-n", "--nproc", type=int, default=1, help="MPI ranks per task")
+    p.add_argument("-j", "--nparallel", type=int, default=1, help="Concurrent tasks")
 
     p = subparsers.add_parser("lr-custom", help=COMMAND_DOCS["lr-custom"]["description"])
     p.add_argument("-d", dest="dir", nargs="?", help="Working directory")
     p.add_argument("-a", "--abacus", default="abacus", help="Path to ABACUS binary")
     p.add_argument("-i", "--indices", required=True, help="Comma-separated atom indices (0-based)")
-    p.add_argument("--axes", required=True, help="Comma-separated axes (x,y,z)")
+    p.add_argument("-A", "--axes", required=True, help="Comma-separated axes (x,y,z)")
     p.add_argument("-x", "--dx", type=float, default=0.001, help="Displacement distance")
     p.add_argument("-s", "--skip-gs", action="store_true", help="Skip ground state calculation")
+    p.add_argument("-n", "--nproc", type=int, default=1, help="MPI ranks per task")
+    p.add_argument("-j", "--nparallel", type=int, default=1, help="Concurrent tasks")
 
     p = subparsers.add_parser("kslr-custom", help=COMMAND_DOCS["kslr-custom"]["description"])
     p.add_argument("-d", dest="dir", nargs="?", help="Working directory")
     p.add_argument("-a", "--abacus", default="abacus", help="Path to ABACUS binary")
     p.add_argument("-i", "--indices", required=True, help="Comma-separated atom indices (0-based)")
-    p.add_argument("--axes", required=True, help="Comma-separated axes (x,y,z)")
+    p.add_argument("-A", "--axes", required=True, help="Comma-separated axes (x,y,z)")
     p.add_argument("-x", "--dx", type=float, default=0.001, help="Displacement distance")
+    p.add_argument("-n", "--nproc", type=int, default=1, help="MPI ranks per task")
+    p.add_argument("-j", "--nparallel", type=int, default=1, help="Concurrent tasks")
 
     args = parser.parse_args()
 
@@ -178,7 +184,8 @@ def main():
         indices = [int(x.strip()) for x in args.indices.split(",")]
         axes = [x.strip() for x in args.axes.split(",")]
         forces = run_diff_custom_groundstate(
-            args.dir, args.abacus, diffed_atom_indices=indices, axes=axes, dx=args.dx
+            args.dir, args.abacus, diffed_atom_indices=indices, axes=axes, dx=args.dx,
+            nproc=args.nproc, nparallel=args.nparallel
         )
         logger.info("Forces (eV/Angstrom):\n%s", forces)
 
@@ -186,7 +193,8 @@ def main():
         indices = [int(x.strip()) for x in args.indices.split(",")]
         axes = [x.strip() for x in args.axes.split(",")]
         forces = run_diff_custom_lr(
-            args.dir, args.abacus, diffed_atom_indices=indices, axes=axes, dx=args.dx, skip_groundstate=args.skip_gs
+            args.dir, args.abacus, diffed_atom_indices=indices, axes=axes, dx=args.dx,
+            skip_groundstate=args.skip_gs, nproc=args.nproc, nparallel=args.nparallel
         )
         logger.info("Excited state forces:\n%s", forces)
 
@@ -194,7 +202,8 @@ def main():
         indices = [int(x.strip()) for x in args.indices.split(",")]
         axes = [x.strip() for x in args.axes.split(",")]
         forces = run_diff_custom_kslr(
-            args.dir, args.abacus, diffed_atom_indices=indices, axes=axes, dx=args.dx
+            args.dir, args.abacus, diffed_atom_indices=indices, axes=axes, dx=args.dx,
+            nproc=args.nproc, nparallel=args.nparallel
         )
         logger.info("Excited state forces:\n%s", forces)
 

@@ -368,9 +368,13 @@ def _run_task_kslr_worker(task_info):
     
     os.makedirs(task_dir, exist_ok=True)
     target_input = os.path.join(task_dir, 'INPUT')
-    with open(src_input, "r") as fs, open(target_input, "w") as fd: 
+    with open(src_input, "r") as fs, open(target_input, "w") as fd:
         fd.write(fs.read())
-    modify_input_calculation(target_input, calculation)
+    # Only force the calculation type when explicitly requested. The custom
+    # APIs pass calculation=None to copy INPUT/INPUT_lr verbatim (e.g. lr-custom
+    # relies on running_nscf.log and must keep its esolver_type intact).
+    if calculation:
+        modify_input_calculation(target_input, calculation)
     
     with open(task_stru_path, "r") as fs, open(os.path.join(task_dir, "STRU"), "w") as fd:
         fd.write(fs.read())
@@ -380,6 +384,52 @@ def _run_task_kslr_worker(task_info):
     
     run_abacus(task_dir, abacus_path, nproc=nproc, log=log)
     return task_name
+
+
+def _build_task(task_name, points_dir, moved_stru_dir, src_input, src_kpt,
+                abacus_path, nproc, log, calculation=None):
+    """Assemble the task_info dict consumed by ``_run_task_kslr_worker``."""
+    return {
+        'task_name': task_name,
+        'task_dir': os.path.join(points_dir, task_name),
+        'task_stru_path': os.path.join(moved_stru_dir, task_name),
+        'src_input': src_input,
+        'src_kpt': src_kpt,
+        'abacus_path': abacus_path,
+        'nproc': nproc,
+        'log': log,
+        'calculation': calculation,
+    }
+
+
+def _dispatch_tasks(tasks, nparallel):
+    """Run finite-difference point tasks, with optional task-level parallelism.
+
+    Mirrors the dispatch used by ``run_diff_all_kslr``: ``nparallel`` ABACUS
+    instances run concurrently via a ``ProcessPoolExecutor`` (each instance may
+    itself use ``nproc`` MPI ranks), falling back to a serial loop otherwise.
+    """
+    nproc = tasks[0]['nproc'] if tasks else 1
+    logger.info(
+        f"Submitting {len(tasks)} tasks with nparallel={nparallel} (nproc per task={nproc})..."
+    )
+    if nparallel > 1:
+        logger.warning(
+            "Resource Reminder: Ensure Total Cores >= nparallel * nproc to avoid oversubscription."
+        )
+        with concurrent.futures.ProcessPoolExecutor(max_workers=nparallel) as executor:
+            futures = [executor.submit(_run_task_kslr_worker, t) for t in tasks]
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    name = future.result()
+                    logger.info(f"Finished task: {name}")
+                except Exception as exc:
+                    logger.error(f"Task generated an exception: {exc}")
+                    raise
+    else:
+        for t in tasks:
+            logger.info(f"Running ABACUS for {t['task_name']}...")
+            _run_task_kslr_worker(t)
 
 
 def run_diff_all_kslr(dir=".", abacus_path="abacus", dx=0.001, nproc=1, nparallel=1, calculation="scf"):
@@ -397,41 +447,17 @@ def run_diff_all_kslr(dir=".", abacus_path="abacus", dx=0.001, nproc=1, nparalle
     points_dir = os.path.join(dir, "points")
     os.makedirs(points_dir, exist_ok=True)
 
-    tasks = []
-    for i in range(natoms):
-        for axis in ["x", "y", "z", "-x", "-y", "-z"]:
-            task_name = f"STRU_{i}_{axis}"
-            task_dir = os.path.join(points_dir, task_name)
-            task_stru_path = os.path.join(dir, "moved_STRU", task_name)
-            tasks.append({
-                'task_name': task_name,
-                'task_dir': task_dir,
-                'abacus_path': abacus_path,
-                'nproc': nproc,
-                'log': "ks-lr.log",
-                'src_input': src_input,
-                'task_stru_path': task_stru_path,
-                'src_kpt': src_kpt,
-                'calculation': calculation
-            })
+    moved_stru_dir = os.path.join(dir, "moved_STRU")
+    tasks = [
+        _build_task(
+            f"STRU_{i}_{axis}", points_dir, moved_stru_dir, src_input, src_kpt,
+            abacus_path, nproc, "ks-lr.log", calculation=calculation,
+        )
+        for i in range(natoms)
+        for axis in ["x", "y", "z", "-x", "-y", "-z"]
+    ]
 
-    logger.info(f"Submitting {len(tasks)} tasks with nparallel={nparallel} (nproc per task={nproc})...")
-    logger.warning("Resource Reminder: Ensure Total Cores >= nparallel * nproc to avoid oversubscription.")
-    
-    if nparallel > 1:
-        with concurrent.futures.ProcessPoolExecutor(max_workers=nparallel) as executor:
-            futures = [executor.submit(_run_task_kslr_worker, t) for t in tasks]
-            for future in concurrent.futures.as_completed(futures):
-                try:
-                    name = future.result()
-                    logger.info(f"Finished task: {name}")
-                except Exception as exc:
-                    logger.error(f"Task generated an exception: {exc}")
-                    raise
-    else:
-        for t in tasks:
-            logger.info(f"Running ABACUS for {t['task_name']}...")
-            _run_task_kslr_worker(t)
+    _dispatch_tasks(tasks, nparallel)
 
     # Collect results
     suffix = grep_parameter_from_input(src_input, "suffix") or "ABACUS"
@@ -524,7 +550,7 @@ def prepare_diff_custom(
                 move_an_atom_in_stru(src_stru, dest, i, dr)
 
 def run_diff_custom_groundstate(
-    dir=".", abacus_path="abacus", *, diffed_atom_indices, axes, dx=0.001
+    dir=".", abacus_path="abacus", *, diffed_atom_indices, axes, dx=0.001, nproc=1, nparallel=1
 ):
     """Compute ground state forces for custom atoms using finite difference.
 
@@ -534,6 +560,8 @@ def run_diff_custom_groundstate(
         diffed_atom_indices: List of atom indices (0-based) to displace
         axes: List of axes to displace ('x', 'y', 'z')
         dx: Displacement distance in Angstrom (default 0.001)
+        nproc: Number of MPI ranks per ABACUS task (default 1)
+        nparallel: Number of concurrent ABACUS tasks (default 1)
 
     Returns:
         forces: dict mapping atom index to axis to force array
@@ -558,19 +586,17 @@ def run_diff_custom_groundstate(
 
     points_dir = os.path.join(dir, "points")
     os.makedirs(points_dir, exist_ok=True)
+    moved_stru_dir = os.path.join(dir, "moved_STRU")
 
-    for i in diffed_atom_indices:
-        for axis in axes + ["-" + axis for axis in axes]:
-            task_name = f"STRU_{i}_{axis}"
-            task_stru = os.path.join(dir, "moved_STRU", task_name)
-            task_dir = os.path.join(points_dir, task_name)
-            os.makedirs(task_dir, exist_ok=True)
-            os.system(f"cp {src_input} {os.path.join(task_dir, 'INPUT')}")
-            os.system(f"cp {task_stru} {os.path.join(task_dir, 'STRU')}")
-            if src_kpt is not None:
-                os.system(f"cp {src_kpt} {os.path.join(task_dir, 'KPT')}")
-            logger.info(f"Running ABACUS SCF for atom {i} moved along {axis}...")
-            run_abacus(task_dir, abacus_path, log="gs.log")
+    tasks = [
+        _build_task(
+            f"STRU_{i}_{axis}", points_dir, moved_stru_dir, src_input, src_kpt,
+            abacus_path, nproc, "gs.log",
+        )
+        for i in diffed_atom_indices
+        for axis in axes + ["-" + axis for axis in axes]
+    ]
+    _dispatch_tasks(tasks, nparallel)
 
     suffix = grep_parameter_from_input(src_input, "suffix")
     if suffix is None or suffix == "":
@@ -599,6 +625,8 @@ def run_diff_custom_lr(
     axes,
     dx=0.001,
     skip_groundstate=False,
+    nproc=1,
+    nparallel=1,
 ):
     """Compute linear response TDDFT excited state forces for custom atoms.
 
@@ -609,6 +637,8 @@ def run_diff_custom_lr(
         axes: List of axes to displace ('x', 'y', 'z')
         dx: Displacement distance in Angstrom (default 0.001)
         skip_groundstate: Skip ground state calculation if already done (default False)
+        nproc: Number of MPI ranks per ABACUS task (default 1)
+        nparallel: Number of concurrent ABACUS tasks (default 1)
 
     Returns:
         excited_state_forces: dict mapping atom index to axis to force array
@@ -652,22 +682,21 @@ def run_diff_custom_lr(
     else:
         os.system(f"cp {os.path.join(dir, 'INPUT_gs')} {os.path.join(dir, 'INPUT')}")
         ground_state_forces = run_diff_custom_groundstate(
-            dir, abacus_path, diffed_atom_indices=diffed_atom_indices, axes=axes, dx=dx
+            dir, abacus_path, diffed_atom_indices=diffed_atom_indices, axes=axes, dx=dx,
+            nproc=nproc, nparallel=nparallel,
         )
         os.system(f"rm {os.path.join(dir, 'INPUT')}")
 
-    for i in diffed_atom_indices:
-        for axis in axes + ["-" + axis for axis in axes]:
-            task_name = f"STRU_{i}_{axis}"
-            task_stru = os.path.join(dir, "moved_STRU", task_name)
-            task_dir = os.path.join(points_dir, task_name)
-            os.makedirs(task_dir, exist_ok=True)
-            os.system(f"cp {src_input_lr} {os.path.join(task_dir, 'INPUT')}")
-            os.system(f"cp {task_stru} {os.path.join(task_dir, 'STRU')}")
-            if src_kpt is not None:
-                os.system(f"cp {src_kpt} {os.path.join(task_dir, 'KPT')}")
-            logger.info(f"Running ABACUS LR for atom {i} moved along {axis}...")
-            run_abacus(task_dir, abacus_path, log="lr.log")
+    moved_stru_dir = os.path.join(dir, "moved_STRU")
+    lr_tasks = [
+        _build_task(
+            f"STRU_{i}_{axis}", points_dir, moved_stru_dir, src_input_lr, src_kpt,
+            abacus_path, nproc, "lr.log",
+        )
+        for i in diffed_atom_indices
+        for axis in axes + ["-" + axis for axis in axes]
+    ]
+    _dispatch_tasks(lr_tasks, nparallel)
 
     excited_state_forces = {}
     for i in diffed_atom_indices:
@@ -692,7 +721,7 @@ def run_diff_custom_lr(
 
 
 def run_diff_custom_kslr(
-    dir=".", abacus_path="abacus", *, diffed_atom_indices, axes, dx=0.001
+    dir=".", abacus_path="abacus", *, diffed_atom_indices, axes, dx=0.001, nproc=1, nparallel=1
 ):
     """Compute excited state forces using Kohn-Sham linear response for custom atoms.
 
@@ -702,6 +731,8 @@ def run_diff_custom_kslr(
         diffed_atom_indices: List of atom indices (0-based) to displace
         axes: List of axes to displace ('x', 'y', 'z')
         dx: Displacement distance in Angstrom (default 0.001)
+        nproc: Number of MPI ranks per ABACUS task (default 1)
+        nparallel: Number of concurrent ABACUS tasks (default 1)
 
     Returns:
         excited_state_forces: dict mapping atom index to axis to force array
@@ -726,19 +757,17 @@ def run_diff_custom_kslr(
 
     points_dir = os.path.join(dir, "points")
     os.makedirs(points_dir, exist_ok=True)
+    moved_stru_dir = os.path.join(dir, "moved_STRU")
 
-    for i in diffed_atom_indices:
-        for axis in axes + ["-" + axis for axis in axes]:
-            task_name = f"STRU_{i}_{axis}"
-            task_stru = os.path.join(dir, "moved_STRU", task_name)
-            task_dir = os.path.join(points_dir, task_name)
-            os.makedirs(task_dir, exist_ok=True)
-            os.system(f"cp {src_input} {os.path.join(task_dir, 'INPUT')}")
-            os.system(f"cp {task_stru} {os.path.join(task_dir, 'STRU')}")
-            if src_kpt is not None:
-                os.system(f"cp {src_kpt} {os.path.join(task_dir, 'KPT')}")
-            logger.info(f"Running ABACUS SCF for atom {i} moved along {axis}...")
-            run_abacus(task_dir, abacus_path, log="ks-lr.log")
+    tasks = [
+        _build_task(
+            f"STRU_{i}_{axis}", points_dir, moved_stru_dir, src_input, src_kpt,
+            abacus_path, nproc, "ks-lr.log",
+        )
+        for i in diffed_atom_indices
+        for axis in axes + ["-" + axis for axis in axes]
+    ]
+    _dispatch_tasks(tasks, nparallel)
 
     suffix = grep_parameter_from_input(src_input, "suffix")
     if suffix is None or suffix == "":

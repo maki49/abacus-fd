@@ -50,12 +50,13 @@ abacus-fd --help
 
 | Short | Long | Description | Default |
 |-------|------|-------------|---------|
-| `-d` | `--dir` | Working directory | Current dir |
+| `-d` | `--dir` | Working directory containing INPUT and STRU files | Current dir |
 | `-a` | `--abacus` | ABACUS executable path | `abacus` |
 | `-x` | `--dx` | Displacement (Angstrom) | `0.001` |
 | `-n` | `--nproc` | MPI ranks **per task** | `1` |
 | `-j` | `--nparallel` | Number of **concurrent tasks** | `1` |
-| `-i` | `--indices` | Atom indices (comma-separated) | - |
+| `-i` | `--indices` | Atom indices (comma-separated, only for custom commands) | - |
+| `-A` | `--axes` | Displacement directions (comma-separated from x,y,z, only for custom commands) | - |
 | `-s` | `--skip-gs` | Skip ground state calculation | False |
 
 ## Parallelism and Resource Management
@@ -128,7 +129,7 @@ Ground state forces for all atoms along x/y/z.
 
 **Usage:**
 ```bash
-abacus-fd gs-all [-d DIR] [-a ABACUS] [-x DX]
+abacus-fd gs-all [-d DIR] [-a ABACUS] [-x DX] -n NPROC -j NPARALLEL
 ```
 
 **Examples:**
@@ -147,7 +148,7 @@ Ground state forces for specified atoms and directions.
 
 **Usage:**
 ```bash
-abacus-fd gs-custom [-d DIR] [-a ABACUS] -i INDICES --axes AXES [-x DX]
+abacus-fd gs-custom [-d DIR] [-a ABACUS] -i INDICES --axes AXES [-x DX] -n NPROC -j NPARALLEL
 ```
 
 **Python equivalent:**
@@ -172,7 +173,7 @@ LR-TDDFT excited state forces for all atoms along x/y/z.
 
 **Usage:**
 ```bash
-abacus-fd lr-all [-d DIR] [-a ABACUS] [-x DX] [-s]
+abacus-fd lr-all [-d DIR] [-a ABACUS] [-x DX] [-s] -n NPROC -j NPARALLEL
 ```
 
 **Examples:**
@@ -196,7 +197,7 @@ LR-TDDFT excited state forces for specified atoms and directions.
 
 **Usage:**
 ```bash
-abacus-fd lr-custom [-d DIR] [-a ABACUS] -i INDICES --axes AXES [-x DX] [-s]
+abacus-fd lr-custom [-d DIR] [-a ABACUS] -i INDICES --axes AXES [-x DX] [-s] -n NPROC -j NPARALLEL
 ```
 
 **Python equivalent:**
